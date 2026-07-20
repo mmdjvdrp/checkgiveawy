@@ -3,6 +3,7 @@ import re
 import os
 from flask import Flask
 import threading
+import traceback
 
 # دریافت توکن از تنظیمات سرور
 TOKEN = os.environ.get('BOT_TOKEN')
@@ -10,55 +11,57 @@ bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 # ----------------- کدهای ربات -----------------
-# توجه: کلمه 'giveaway' به لیست انواع پیام‌ها اضافه شد
 @bot.message_handler(content_types=['text', 'photo', 'video', 'document', 'giveaway'])
 def extract_channel_ids(message):
-    extracted_channels = set()
+    try:
+        extracted_channels = set()
 
-    # --- بخش جدید: تشخیص قرعه‌کشی‌های رسمی (Native Giveaways) تلگرام ---
-    if message.giveaway and message.giveaway.chats:
-        for chat in message.giveaway.chats:
-            if chat.username:
-                # اگر کانال عمومی باشد و آیدی داشته باشد
-                extracted_channels.add('@' + chat.username.lower())
-            else:
-                # اگر کانال پرایوت (خصوصی) باشد، آیدی عمومی ندارد، پس اسم و آیدی عددی‌اش را می‌دهیم
-                extracted_channels.add(f"🔒 کانال خصوصی: {chat.title} (ID: {chat.id})")
+        # 1. استخراج از پیام‌های قرعه‌کشی (Native Giveaways)
+        if message.content_type == 'giveaway' and message.giveaway and message.giveaway.chats:
+            for chat in message.giveaway.chats:
+                if chat.username:
+                    extracted_channels.add('@' + chat.username.lower())
+                else:
+                    extracted_channels.add(f"🔒 کانال خصوصی: {chat.title} (ID: {chat.id})")
 
+        # 2. استخراج از متن و کپشن
+        text = message.text or message.caption or ""
+        
+        usernames = re.findall(r'@\w+', text)
+        for u in usernames:
+            extracted_channels.add(u.lower())
 
-    # --- بخش قبلی ۱: استخراج از متن و کپشن ---
-    text = message.text or message.caption or ""
-    
-    usernames = re.findall(r'@\w+', text)
-    for u in usernames:
-        extracted_channels.add(u.lower())
+        links = re.findall(r'(?:t\.me|telegram\.me)/(\w+)', text)
+        for l in links:
+            if len(l) < 32 and not l.startswith('+'):
+                extracted_channels.add('@' + l.lower())
 
-    links = re.findall(r'(?:t\.me|telegram\.me)/(\w+)', text)
-    for l in links:
-        if len(l) < 32 and not l.startswith('+'):
-            extracted_channels.add('@' + l.lower())
+        # 3. استخراج از دکمه‌های شیشه‌ای (باگ این بخش برطرف شد)
+        if message.reply_markup and hasattr(message.reply_markup, 'keyboard'):
+            for row in message.reply_markup.keyboard:
+                for button in row:
+                    # بررسی می‌کنیم که آیا دکمه لینک دارد یا خیر
+                    if hasattr(button, 'url') and button.url:
+                        if 't.me/' in button.url or 'telegram.me/' in button.url:
+                            match = re.search(r'(?:t\.me|telegram\.me)/(\w+)', button.url)
+                            if match:
+                                channel_id = match.group(1)
+                                if len(channel_id) < 32 and not channel_id.startswith('+'):
+                                    extracted_channels.add('@' + channel_id.lower())
 
+        # --- ارسال نتیجه به کاربر ---
+        if extracted_channels:
+            response = "✅ **آیدی‌های پیدا شده:**\n\n" + "\n".join(extracted_channels)
+        else:
+            response = "❌ هیچ آیدی یا لینک کانالی در این پیام پیدا نشد."
 
-    # --- بخش قبلی ۲: استخراج از دکمه‌های شیشه‌ای ---
-    if message.reply_markup and message.reply_markup.keyboard:
-        keyboard = message.reply_markup.keyboard
-        for row in keyboard:
-            for button in row:
-                if 'url' in button and ('t.me/' in button['url'] or 'telegram.me/' in button['url']):
-                    match = re.search(r'(?:t\.me|telegram\.me)/(\w+)', button['url'])
-                    if match:
-                        channel_id = match.group(1)
-                        if len(channel_id) < 32 and not channel_id.startswith('+'):
-                            extracted_channels.add('@' + channel_id.lower())
+        bot.reply_to(message, response, parse_mode='Markdown')
 
-
-    # --- ارسال نتیجه به کاربر ---
-    if extracted_channels:
-        response = "✅ **آیدی‌های پیدا شده:**\n\n" + "\n".join(extracted_channels)
-    else:
-        response = "❌ هیچ آیدی یا لینک کانالی در این پیام پیدا نشد."
-
-    bot.reply_to(message, response, parse_mode='Markdown')
+    except Exception as e:
+        # اگر هر خطایی در کد رخ دهد، ربات خاموش نمیشود و فقط ارور را میفرستد
+        error_msg = f"⚠️ ربات نتوانست این پیام را پردازش کند.\n\n`{str(e)}`"
+        bot.reply_to(message, error_msg, parse_mode='Markdown')
+        print("Error details:\n", traceback.format_exc())
 
 
 # ----------------- کدهای سرور وب (برای Render) -----------------
@@ -67,7 +70,7 @@ def index():
     return "✅ Bot is running successfully on Render!"
 
 def run_bot():
-    # استفاده از non_stop برای جلوگیری از قطع شدن‌های ناگهانی
+    # روشن نگه داشتن ربات
     bot.infinity_polling(non_stop=True, timeout=60)
 
 if __name__ == "__main__":
