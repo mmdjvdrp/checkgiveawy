@@ -19,6 +19,7 @@ def extract_channel_ids(message):
     try:
         extracted_channels = set()
 
+        # بررسی پیام‌های Giveaway رسمی تلگرام
         if message.content_type == 'giveaway' and message.giveaway and message.giveaway.chats:
             for chat in message.giveaway.chats:
                 if chat.username:
@@ -28,6 +29,7 @@ def extract_channel_ids(message):
 
         text = message.text or message.caption or ""
         
+        # استخراج از متن
         usernames = re.findall(r'@\w+', text)
         for u in usernames:
             extracted_channels.add(u.lower())
@@ -37,6 +39,7 @@ def extract_channel_ids(message):
             if len(l) < 32 and not l.startswith('+'):
                 extracted_channels.add('@' + l.lower())
 
+        # استخراج از دکمه‌های شیشه‌ای
         if message.reply_markup and hasattr(message.reply_markup, 'keyboard'):
             for row in message.reply_markup.keyboard:
                 for button in row:
@@ -48,6 +51,7 @@ def extract_channel_ids(message):
                                 if len(channel_id) < 32 and not channel_id.startswith('+'):
                                     extracted_channels.add('@' + channel_id.lower())
 
+        # ارسال جواب
         if extracted_channels:
             response = "✅ **آیدی‌های پیدا شده:**\n\n" + "\n".join(extracted_channels)
         else:
@@ -70,7 +74,8 @@ def run_bot():
         bot.remove_webhook()
         time.sleep(1)
         print("✅ تنظیمات پاک شد. ربات در حال روشن شدن است...")
-        bot.infinity_polling(non_stop=True, timeout=60)
+        # مشکل ارور در اینجا برطرف شد
+        bot.infinity_polling(timeout=60)
     except Exception as e:
         print("❌ خطای شدید در روشن شدن ربات:\n", traceback.format_exc())
 
