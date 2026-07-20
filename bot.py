@@ -4,19 +4,21 @@ import os
 from flask import Flask
 import threading
 import traceback
+import time
 
-# دریافت توکن از تنظیمات سرور
+# دریافت توکن
 TOKEN = os.environ.get('BOT_TOKEN')
+if not TOKEN:
+    print("❌ ارور: توکن ربات (BOT_TOKEN) در تنظیمات رندر پیدا نشد!")
+
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# ----------------- کدهای ربات -----------------
 @bot.message_handler(content_types=['text', 'photo', 'video', 'document', 'giveaway'])
 def extract_channel_ids(message):
     try:
         extracted_channels = set()
 
-        # 1. استخراج از پیام‌های قرعه‌کشی (Native Giveaways)
         if message.content_type == 'giveaway' and message.giveaway and message.giveaway.chats:
             for chat in message.giveaway.chats:
                 if chat.username:
@@ -24,7 +26,6 @@ def extract_channel_ids(message):
                 else:
                     extracted_channels.add(f"🔒 کانال خصوصی: {chat.title} (ID: {chat.id})")
 
-        # 2. استخراج از متن و کپشن
         text = message.text or message.caption or ""
         
         usernames = re.findall(r'@\w+', text)
@@ -36,11 +37,9 @@ def extract_channel_ids(message):
             if len(l) < 32 and not l.startswith('+'):
                 extracted_channels.add('@' + l.lower())
 
-        # 3. استخراج از دکمه‌های شیشه‌ای (باگ این بخش برطرف شد)
         if message.reply_markup and hasattr(message.reply_markup, 'keyboard'):
             for row in message.reply_markup.keyboard:
                 for button in row:
-                    # بررسی می‌کنیم که آیا دکمه لینک دارد یا خیر
                     if hasattr(button, 'url') and button.url:
                         if 't.me/' in button.url or 'telegram.me/' in button.url:
                             match = re.search(r'(?:t\.me|telegram\.me)/(\w+)', button.url)
@@ -49,7 +48,6 @@ def extract_channel_ids(message):
                                 if len(channel_id) < 32 and not channel_id.startswith('+'):
                                     extracted_channels.add('@' + channel_id.lower())
 
-        # --- ارسال نتیجه به کاربر ---
         if extracted_channels:
             response = "✅ **آیدی‌های پیدا شده:**\n\n" + "\n".join(extracted_channels)
         else:
@@ -58,25 +56,26 @@ def extract_channel_ids(message):
         bot.reply_to(message, response, parse_mode='Markdown')
 
     except Exception as e:
-        # اگر هر خطایی در کد رخ دهد، ربات خاموش نمیشود و فقط ارور را میفرستد
         error_msg = f"⚠️ ربات نتوانست این پیام را پردازش کند.\n\n`{str(e)}`"
         bot.reply_to(message, error_msg, parse_mode='Markdown')
         print("Error details:\n", traceback.format_exc())
 
-
-# ----------------- کدهای سرور وب (برای Render) -----------------
 @app.route('/')
 def index():
     return "✅ Bot is running successfully on Render!"
 
 def run_bot():
-    # روشن نگه داشتن ربات
-    bot.infinity_polling(non_stop=True, timeout=60)
+    print("⏳ در حال پاک کردن تنظیمات قبلی تلگرام...")
+    try:
+        bot.remove_webhook()
+        time.sleep(1)
+        print("✅ تنظیمات پاک شد. ربات در حال روشن شدن است...")
+        bot.infinity_polling(non_stop=True, timeout=60)
+    except Exception as e:
+        print("❌ خطای شدید در روشن شدن ربات:\n", traceback.format_exc())
 
 if __name__ == "__main__":
-    # اجرای ربات در پس‌زمینه
+    print("🚀 در حال استارت کردن سرور...")
     threading.Thread(target=run_bot, daemon=True).start()
-    
-    # اجرای سرور وب برای Render
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
