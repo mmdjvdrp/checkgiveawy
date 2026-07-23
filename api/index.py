@@ -1,22 +1,27 @@
-import telebot
-import re
 import os
+import re
 import json
+import requests
 from flask import Flask, request
 
 TOKEN = os.environ.get('BOT_TOKEN')
-# آیدی عددی اکانت اصلی شما 
 MY_ID = 1174871042
 
-bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-def process_message(message):
+# تابع ساده برای ارسال پیام به پیوی شما بدون نیاز به کتابخانه‌های دردسرساز
+def send_to_me(text):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    payload = {
+        "chat_id": MY_ID,
+        "text": text
+    }
+    requests.post(url, json=payload)
+
+# تابع پردازش پیام (دقیقاً کدهای خودتان که روی JSON خام اجرا می‌شود)
+def process_raw_message(msg_dict):
     try:
         extracted_channels = set()
-        
-        # گرفتن دیتای خام
-        msg_dict = message.json
         
         # ۱. بررسی دیتای قرعه‌کشی
         if 'giveaway' in msg_dict and 'chats' in msg_dict['giveaway']:
@@ -58,36 +63,37 @@ def process_message(message):
                 if match:
                     extracted_channels.add('@' + match.group(1).lower())
 
-        # --- ارسال نتایج مستقیماً به پیوی شما (MY_ID) ---
+        # --- خروجی ---
         if extracted_channels:
             response = "✅ آیدی‌های استخراج شده:\n\n" + "\n".join(extracted_channels)
-            bot.send_message(MY_ID, response)
+            send_to_me(response)
         else:
             raw_data = json.dumps(msg_dict, indent=2, ensure_ascii=False)
-            bot.send_message(MY_ID, f"❌ آیدی پیدا نشد!\nلطفاً کد زیر را بررسی کن:\n\n{raw_data[:3500]}")
+            send_to_me(f"❌ آیدی پیدا نشد!\nلطفاً کد زیر را بررسی کن:\n\n{raw_data[:3500]}")
 
     except Exception as e:
-        bot.send_message(MY_ID, f"⚠️ خطا در سیستم استخراج:\n{str(e)}")
+        send_to_me(f"⚠️ خطا در سیستم استخراج:\n{str(e)}")
 
-
-# بازگرداندن سیستم رادار همه‌جانبه‌ی خودتان
-def update_listener(messages):
-    for message in messages:
-        process_message(message)
-
-bot.set_update_listener(update_listener)
-
-
-# مسیر اصلی وب‌هوک برای ورسل
+# مسیر اصلی ورسل
 @app.route('/', methods=['POST', 'GET'])
 def index():
     if request.method == 'POST':
         try:
-            json_string = request.get_data().decode('utf-8')
-            update = telebot.types.Update.de_json(json_string)
-            bot.process_new_updates([update])
+            update = request.get_json()
+            
+            # استخراج دقیق پیام از دیتای خام تلگرام
+            msg_dict = None
+            if 'message' in update:
+                msg_dict = update['message']
+            elif 'channel_post' in update:
+                msg_dict = update['channel_post']
+                
+            if msg_dict:
+                process_raw_message(msg_dict)
+                
         except Exception as e:
-            print(f"Error processing update: {e}")
+            print("Error processing webhook:", e)
+            
         return "OK", 200
     else:
-        return "✅ Giveaway Checker Bot is running successfully on Vercel!", 200
+        return "✅ Giveaway Checker Bot is running bulletproof on Vercel!", 200
