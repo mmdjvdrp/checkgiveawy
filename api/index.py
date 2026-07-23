@@ -3,6 +3,7 @@ import re
 import json
 import requests
 from flask import Flask, request, jsonify
+from datetime import datetime
 
 TOKEN = os.environ.get('BOT_TOKEN')
 MY_ID = 1174871042
@@ -32,10 +33,19 @@ def process_raw_message(msg_dict):
     try:
         extracted_channels = set()
         allowed_countries_text = ""
+        giveaway_date_text = ""
         
-        # ۱. بررسی دیتای قرعه‌کشی (Giveaway) و کشورها
+        # ۱. بررسی دیتای قرعه‌کشی (Giveaway)، کشورها و تاریخ
         giveaway = msg_dict.get('giveaway') or {}
         if giveaway:
+            # استخراج تاریخ قرعه‌کشی
+            selection_date_ts = giveaway.get('winners_selection_date')
+            if selection_date_ts:
+                # تبدیل تایم‌استمپ تلگرام به تاریخ خوانا
+                dt = datetime.utcfromtimestamp(selection_date_ts)
+                date_str = dt.strftime('%Y/%m/%d ساعت %H:%M')
+                giveaway_date_text = f"📅 تاریخ قرعه‌کشی: {date_str} (به وقت جهانی UTC)"
+
             # استخراج چنل‌ها
             chats = giveaway.get('chats') or []
             for chat in chats:
@@ -93,8 +103,10 @@ def process_raw_message(msg_dict):
                             extracted_channels.add('@' + match.group(1).lower())
 
         # --- ارسال خروجی ---
-        if extracted_channels or allowed_countries_text:
+        if extracted_channels or allowed_countries_text or giveaway_date_text:
             response = "✅ اطلاعات استخراج شده:\n\n"
+            if giveaway_date_text:
+                response += giveaway_date_text + "\n"
             if allowed_countries_text:
                 response += allowed_countries_text + "\n\n"
             if extracted_channels:
@@ -122,6 +134,4 @@ def index():
         except Exception as e:
             print("Critical Webhook Error:", e)
             
-        return jsonify({"status": "ok"}), 200
-    else:
-        return "✅ Giveaway Checker Bot is running with Country Detection!", 200
+        return jsonify({"status":
