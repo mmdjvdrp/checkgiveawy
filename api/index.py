@@ -2,98 +2,111 @@ import os
 import re
 import json
 import requests
-from flask import Flask, request
+from flask import Flask, request, jsonify
 
 TOKEN = os.environ.get('BOT_TOKEN')
 MY_ID = 1174871042
 
 app = Flask(__name__)
 
-# تابع ساده برای ارسال پیام به پیوی شما بدون نیاز به کتابخانه‌های دردسرساز
+# تابع ارسال پیام به پیوی (با محدودیت زمانی برای جلوگیری از خاموش شدن ورسل)
 def send_to_me(text):
+    if not TOKEN:
+        return
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    
+    # تلگرام پیام‌های طولانی‌تر از 4096 کاراکتر را مسدود می‌کند، پس آن را برش می‌زنیم
+    if len(text) > 4000:
+        text = text[:4000] + "\n\n...[متن طولانی بود و کوتاه شد]"
+        
     payload = {
         "chat_id": MY_ID,
         "text": text
     }
-    requests.post(url, json=payload)
+    try:
+        # timeout=5 باعث می‌شود ورسل روی این درخواست گیر نکند و کرش ندهد
+        requests.post(url, json=payload, timeout=5)
+    except Exception as e:
+        print(f"Request Timeout or Error: {e}")
 
-# تابع پردازش پیام (دقیقاً کدهای خودتان که روی JSON خام اجرا می‌شود)
+# تابع پردازش کاملاً محافظت‌شده
 def process_raw_message(msg_dict):
     try:
         extracted_channels = set()
         
-        # ۱. بررسی دیتای قرعه‌کشی
-        if 'giveaway' in msg_dict and 'chats' in msg_dict['giveaway']:
-            for chat in msg_dict['giveaway']['chats']:
-                if 'username' in chat:
-                    extracted_channels.add('@' + chat['username'].lower())
-                else:
-                    extracted_channels.add(f"🔒 کانال خصوصی: {chat.get('title')} (ID: {chat.get('id')})")
+        # ۱. بررسی دیتای قرعه‌کشی (Giveaway)
+        giveaway = msg_dict.get('giveaway') or {}
+        chats = giveaway.get('chats') or []
+        for chat in chats:
+            if 'username' in chat:
+                extracted_channels.add('@' + chat['username'].lower())
+            else:
+                extracted_channels.add(f"🔒 کانال خصوصی: {chat.get('title', 'نامشخص')} (ID: {chat.get('id', '')})")
 
         # ۲. بررسی فوروارد
-        if 'forward_origin' in msg_dict:
-            chat = msg_dict['forward_origin'].get('chat', {})
-            if chat.get('username'):
-                extracted_channels.add('@' + chat['username'].lower())
+        forward_origin = msg_dict.get('forward_origin') or {}
+        chat = forward_origin.get('chat') or {}
+        if chat.get('username'):
+            extracted_channels.add('@' + chat['username'].lower())
         
-        # ۳. بررسی متن
-        text = msg_dict.get('text', '') or msg_dict.get('caption', '')
-        for u in re.findall(r'@\w+', text):
-            extracted_channels.add(u.lower())
-        for l in re.findall(r'(?:t\.me|telegram\.me)/(\w+)', text):
-            if len(l) < 32 and not l.startswith('+'):
-                extracted_channels.add('@' + l.lower())
+        # ۳. بررسی متن اصلی و کپشن‌ها
+        text = msg_dict.get('text') or msg_dict.get('caption') or ''
+        if isinstance(text, str) and text:
+            for u in re.findall(r'@\w+', text):
+                extracted_channels.add(u.lower())
+            for l in re.findall(r'(?:t\.me|telegram\.me)/(\w+)', text):
+                if len(l) < 32 and not l.startswith('+'):
+                    extracted_channels.add('@' + l.lower())
 
-        # ۴. بررسی لینک‌های مخفی
-        entities = msg_dict.get('entities', []) + msg_dict.get('caption_entities', [])
+        # ۴. بررسی لینک‌های مخفی (دکمه‌های اینلاین و هایپرلینک‌ها)
+        entities = (msg_dict.get('entities') or []) + (msg_dict.get('caption_entities') or [])
         for ent in entities:
-            if ent.get('type') == 'text_link':
+            if isinstance(ent, dict) and ent.get('type') == 'text_link':
                 match = re.search(r'(?:t\.me|telegram\.me)/(\w+)', ent.get('url', ''))
                 if match:
                     extracted_channels.add('@' + match.group(1).lower())
 
-        # ۵. بررسی دکمه‌ها
-        reply_markup = msg_dict.get('reply_markup', {})
-        inline_keyboard = reply_markup.get('inline_keyboard', [])
+        # ۵. بررسی دکمه‌های شیشه‌ای پایین پیام
+        reply_markup = msg_dict.get('reply_markup') or {}
+        inline_keyboard = reply_markup.get('inline_keyboard') or []
         for row in inline_keyboard:
-            for button in row:
-                url = button.get('url', '')
-                match = re.search(r'(?:t\.me|telegram\.me)/(\w+)', url)
-                if match:
-                    extracted_channels.add('@' + match.group(1).lower())
+            if isinstance(row, list):
+                for button in row:
+                    if isinstance(button, dict):
+                        url = button.get('url', '')
+                        match = re.search(r'(?:t\.me|telegram\.me)/(\w+)', url)
+                        if match:
+                            extracted_channels.add('@' + match.group(1).lower())
 
-        # --- خروجی ---
+        # --- ارسال خروجی ---
         if extracted_channels:
             response = "✅ آیدی‌های استخراج شده:\n\n" + "\n".join(extracted_channels)
             send_to_me(response)
         else:
             raw_data = json.dumps(msg_dict, indent=2, ensure_ascii=False)
-            send_to_me(f"❌ آیدی پیدا نشد!\nلطفاً کد زیر را بررسی کن:\n\n{raw_data[:3500]}")
+            send_to_me(f"❌ آیدی پیدا نشد!\n\nدیتای خام بررسی شود:\n\n{raw_data}")
 
     except Exception as e:
-        send_to_me(f"⚠️ خطا در سیستم استخراج:\n{str(e)}")
+        send_to_me(f"⚠️ خطا در کد استخراج (مدیریت شد):\n{str(e)}")
 
 # مسیر اصلی ورسل
 @app.route('/', methods=['POST', 'GET'])
 def index():
     if request.method == 'POST':
         try:
-            update = request.get_json()
+            # silent=True باعث می‌شود اگر پیام نامعتبر بود ورسل کرش نکند
+            update = request.get_json(silent=True) or {}
             
-            # استخراج دقیق پیام از دیتای خام تلگرام
-            msg_dict = None
-            if 'message' in update:
-                msg_dict = update['message']
-            elif 'channel_post' in update:
-                msg_dict = update['channel_post']
+            # پیدا کردن بدنه اصلی پیام تلگرام
+            msg_dict = update.get('message') or update.get('channel_post')
                 
-            if msg_dict:
+            if msg_dict and isinstance(msg_dict, dict):
                 process_raw_message(msg_dict)
                 
         except Exception as e:
-            print("Error processing webhook:", e)
+            print("Critical Webhook Error:", e)
             
-        return "OK", 200
+        # بلافاصله به تلگرام میگوییم پیام را گرفتیم تا ورسل پردازش را ببندد
+        return jsonify({"status": "ok"}), 200
     else:
         return "✅ Giveaway Checker Bot is running bulletproof on Vercel!", 200
