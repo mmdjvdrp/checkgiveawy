@@ -5,14 +5,12 @@ import json
 from flask import Flask, request
 
 TOKEN = os.environ.get('BOT_TOKEN')
-# آیدی عددی اکانت اصلی شما (@lovepotion)
+# آیدی عددی اکانت اصلی شما 
 MY_ID = 1174871042
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# این هندلر تمام پیام‌های دریافتی ربات را پردازش می‌کند
-@bot.message_handler(func=lambda message: True)
 def process_message(message):
     try:
         extracted_channels = set()
@@ -71,14 +69,25 @@ def process_message(message):
     except Exception as e:
         bot.send_message(MY_ID, f"⚠️ خطا در سیستم استخراج:\n{str(e)}")
 
-# مسیر اصلی ورسل برای دریافت آپدیت‌های تلگرام
+
+# بازگرداندن سیستم رادار همه‌جانبه‌ی خودتان
+def update_listener(messages):
+    for message in messages:
+        process_message(message)
+
+bot.set_update_listener(update_listener)
+
+
+# مسیر اصلی وب‌هوک برای ورسل
 @app.route('/', methods=['POST', 'GET'])
 def index():
     if request.method == 'POST':
-        # دریافت پیام از تلگرام و دادن آن به هندلر بالا
-        json_string = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
+        try:
+            json_string = request.get_data().decode('utf-8')
+            update = telebot.types.Update.de_json(json_string)
+            bot.process_new_updates([update])
+        except Exception as e:
+            print(f"Error processing update: {e}")
         return "OK", 200
     else:
-        return "✅ Giveaway Checker Bot is successfully running on Vercel!", 200
+        return "✅ Giveaway Checker Bot is running successfully on Vercel!", 200
