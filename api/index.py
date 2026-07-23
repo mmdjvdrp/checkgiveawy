@@ -8,9 +8,9 @@ from datetime import datetime
 TOKEN = os.environ.get('BOT_TOKEN')
 MY_ID = 1174871042
 
+# این خط بسیار مهم است و نباید هیچ فاصله‌ای قبل از آن باشد
 app = Flask(__name__)
 
-# تابع ارسال پیام به پیوی
 def send_to_me(text):
     if not TOKEN:
         return
@@ -28,25 +28,20 @@ def send_to_me(text):
     except Exception as e:
         print(f"Request Timeout or Error: {e}")
 
-# تابع پردازش کاملاً محافظت‌شده
 def process_raw_message(msg_dict):
     try:
         extracted_channels = set()
         allowed_countries_text = ""
         giveaway_date_text = ""
         
-        # ۱. بررسی دیتای قرعه‌کشی (Giveaway)، کشورها و تاریخ
         giveaway = msg_dict.get('giveaway') or {}
         if giveaway:
-            # استخراج تاریخ قرعه‌کشی
             selection_date_ts = giveaway.get('winners_selection_date')
             if selection_date_ts:
-                # تبدیل تایم‌استمپ تلگرام به تاریخ خوانا
                 dt = datetime.utcfromtimestamp(selection_date_ts)
                 date_str = dt.strftime('%Y/%m/%d ساعت %H:%M')
                 giveaway_date_text = f"📅 تاریخ قرعه‌کشی: {date_str} (به وقت جهانی UTC)"
 
-            # استخراج چنل‌ها
             chats = giveaway.get('chats') or []
             for chat in chats:
                 if 'username' in chat:
@@ -54,12 +49,10 @@ def process_raw_message(msg_dict):
                 else:
                     extracted_channels.add(f"🔒 کانال خصوصی: {chat.get('title', 'نامشخص')} (ID: {chat.get('id', '')})")
             
-            # استخراج کشورها
             country_codes = giveaway.get('country_codes') or []
             if country_codes:
                 flags = []
                 for code in country_codes:
-                    # تبدیل کد دو حرفی مثل IR به ایموجی پرچم ایران 🇮🇷
                     code_upper = code.upper()
                     flag_emoji = chr(ord(code_upper[0]) + 127397) + chr(ord(code_upper[1]) + 127397)
                     flags.append(f"{code_upper} {flag_emoji}")
@@ -67,13 +60,11 @@ def process_raw_message(msg_dict):
             else:
                 allowed_countries_text = "🌍 کشورهای مجاز: همه کشورها (Global) 🌐"
 
-        # ۲. بررسی فوروارد
         forward_origin = msg_dict.get('forward_origin') or {}
         chat = forward_origin.get('chat') or {}
         if chat.get('username'):
             extracted_channels.add('@' + chat['username'].lower())
         
-        # ۳. بررسی متن اصلی و کپشن‌ها
         text = msg_dict.get('text') or msg_dict.get('caption') or ''
         if isinstance(text, str) and text:
             for u in re.findall(r'@\w+', text):
@@ -82,7 +73,6 @@ def process_raw_message(msg_dict):
                 if len(l) < 32 and not l.startswith('+'):
                     extracted_channels.add('@' + l.lower())
 
-        # ۴. بررسی لینک‌های مخفی
         entities = (msg_dict.get('entities') or []) + (msg_dict.get('caption_entities') or [])
         for ent in entities:
             if isinstance(ent, dict) and ent.get('type') == 'text_link':
@@ -90,7 +80,6 @@ def process_raw_message(msg_dict):
                 if match:
                     extracted_channels.add('@' + match.group(1).lower())
 
-        # ۵. بررسی دکمه‌های شیشه‌ای
         reply_markup = msg_dict.get('reply_markup') or {}
         inline_keyboard = reply_markup.get('inline_keyboard') or []
         for row in inline_keyboard:
@@ -102,7 +91,6 @@ def process_raw_message(msg_dict):
                         if match:
                             extracted_channels.add('@' + match.group(1).lower())
 
-        # --- ارسال خروجی ---
         if extracted_channels or allowed_countries_text or giveaway_date_text:
             response = "✅ اطلاعات استخراج شده:\n\n"
             if giveaway_date_text:
@@ -115,12 +103,11 @@ def process_raw_message(msg_dict):
             send_to_me(response.strip())
         else:
             raw_data = json.dumps(msg_dict, indent=2, ensure_ascii=False)
-            send_to_me(f"❌ اطلاعاتی پیدا نشد!\n\nدیتای خام بررسی شود:\n\n{raw_data}")
+            send_to_me(f"❌ اطلاعاتی پیدا نشد!\n\nدیتای خام بررسی شود:\n\n{raw_data[:3500]}")
 
     except Exception as e:
         send_to_me(f"⚠️ خطا در کد استخراج (مدیریت شد):\n{str(e)}")
 
-# مسیر اصلی ورسل
 @app.route('/', methods=['POST', 'GET'])
 def index():
     if request.method == 'POST':
@@ -134,4 +121,6 @@ def index():
         except Exception as e:
             print("Critical Webhook Error:", e)
             
-        return jsonify({"status":
+        return jsonify({"status": "ok"}), 200
+    else:
+        return "✅ Giveaway Checker Bot is running successfully!", 200
