@@ -2,17 +2,17 @@ import telebot
 import re
 import os
 import json
-from flask import Flask
-import threading
-import time
+from flask import Flask, request
 
 TOKEN = os.environ.get('BOT_TOKEN')
-if not TOKEN:
-    print("❌ توکن یافت نشد!")
+# آیدی عددی اکانت اصلی شما (@lovepotion)
+MY_ID = 1174871042
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
+# این هندلر تمام پیام‌های دریافتی ربات را پردازش می‌کند
+@bot.message_handler(func=lambda message: True)
 def process_message(message):
     try:
         extracted_channels = set()
@@ -60,39 +60,25 @@ def process_message(message):
                 if match:
                     extracted_channels.add('@' + match.group(1).lower())
 
-        # --- تغییرات اینجاست: حذف کامل Markdown برای جلوگیری از ارور تلگرام ---
+        # --- ارسال نتایج مستقیماً به پیوی شما (MY_ID) ---
         if extracted_channels:
-            response = "✅ ایدی های استخراج شده:\n\n" + "\n".join(extracted_channels)
-            # ارسال به صورت متن کاملا ساده
-            bot.reply_to(message, response)
+            response = "✅ آیدی‌های استخراج شده:\n\n" + "\n".join(extracted_channels)
+            bot.send_message(MY_ID, response)
         else:
             raw_data = json.dumps(msg_dict, indent=2, ensure_ascii=False)
-            # ارسال متن کاملا ساده و بدون هیچ فرمتی
-            bot.reply_to(message, f"❌ ایدی پیدا نشد!\nلطفا کد زیر را برای من کپی کن:\n\n{raw_data[:3500]}")
+            bot.send_message(MY_ID, f"❌ آیدی پیدا نشد!\nلطفاً کد زیر را بررسی کن:\n\n{raw_data[:3500]}")
 
     except Exception as e:
-        bot.reply_to(message, f"⚠️ خطا در سیستم:\n{str(e)}")
+        bot.send_message(MY_ID, f"⚠️ خطا در سیستم استخراج:\n{str(e)}")
 
-# رادار پیام‌ها
-def update_listener(messages):
-    for message in messages:
-        process_message(message)
-
-bot.set_update_listener(update_listener)
-
-@app.route('/')
+# مسیر اصلی ورسل برای دریافت آپدیت‌های تلگرام
+@app.route('/', methods=['POST', 'GET'])
 def index():
-    return "✅ Bot is running!"
-
-def run_bot():
-    try:
-        bot.remove_webhook()
-        time.sleep(1)
-        bot.infinity_polling(timeout=60)
-    except Exception as e:
-        print(f"Error: {e}")
-
-if __name__ == "__main__":
-    threading.Thread(target=run_bot, daemon=True).start()
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+    if request.method == 'POST':
+        # دریافت پیام از تلگرام و دادن آن به هندلر بالا
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return "OK", 200
+    else:
+        return "✅ Giveaway Checker Bot is successfully running on Vercel!", 200
