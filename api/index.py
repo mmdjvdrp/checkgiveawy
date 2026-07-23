@@ -3,12 +3,11 @@ import re
 import json
 import requests
 from flask import Flask, request, jsonify
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 TOKEN = os.environ.get('BOT_TOKEN')
 MY_ID = 1174871042
 
-# این خط بسیار مهم است و نباید هیچ فاصله‌ای قبل از آن باشد
 app = Flask(__name__)
 
 def send_to_me(text):
@@ -38,9 +37,21 @@ def process_raw_message(msg_dict):
         if giveaway:
             selection_date_ts = giveaway.get('winners_selection_date')
             if selection_date_ts:
-                dt = datetime.utcfromtimestamp(selection_date_ts)
+                # ساخت تایم‌زون ایران (+03:30)
+                iran_tz = timezone(timedelta(hours=3, minutes=30))
+                
+                # تبدیل تاریخ سرور به تاریخ و ساعت ایران
+                dt = datetime.fromtimestamp(selection_date_ts, tz=timezone.utc).astimezone(iran_tz)
                 date_str = dt.strftime('%Y/%m/%d ساعت %H:%M')
-                giveaway_date_text = f"📅 تاریخ قرعه‌کشی: {date_str} (به وقت جهانی UTC)"
+                
+                # زمان الان به وقت ایران
+                now = datetime.now(iran_tz)
+                
+                # مقایسه اینکه آیا تاریخ قرعه‌کشی گذشته است یا نه
+                if dt < now:
+                    giveaway_date_text = f"📅 تاریخ قرعه‌کشی: {date_str} (به وقت ایران)\n⚠️ **توجه: این قرعه‌کشی تمام شده است!** ❌"
+                else:
+                    giveaway_date_text = f"📅 تاریخ قرعه‌کشی: {date_str} (به وقت ایران) ⏳"
 
             chats = giveaway.get('chats') or []
             for chat in chats:
